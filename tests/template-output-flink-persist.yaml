@@ -1,0 +1,508 @@
+---
+# Source: fluss/templates/minio-secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: test-release-fp-fluss-minio-secret
+  labels:
+    app: fluss
+    component: minio
+type: Opaque
+# Use stringData so the values are automatically base64 encoded by Kubernetes
+stringData:
+  accessKey: "minioadmin"
+  secretKey: "minioadmin"
+---
+# Source: fluss/templates/minio-pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-release-fp-fluss-minio-pvc
+  labels:
+    app: fluss
+    component: minio
+spec:
+  accessModes:
+    - ReadWriteOnce # MinIO standalone requires RWO
+  resources:
+    requests:
+      storage: 10Gi
+---
+# Source: fluss/templates/coordinator-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-release-fp-fluss-coordinator
+  labels:
+    app: fluss
+    component: coordinator
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9123
+      targetPort: 9123
+      protocol: TCP
+      name: http
+  selector:
+    app: fluss
+    component: coordinator
+---
+# Source: fluss/templates/flink-jobmanager-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-release-fp-fluss-flink-jobmanager
+  labels:
+    app: fluss
+    component: flink-jobmanager
+spec:
+  # type: ClusterIP # Default type, can be overridden (e.g., NodePort/LoadBalancer for UI)
+  type: ClusterIP
+  ports:
+  - name: rest
+    port: 8081 # 8081 UI/REST
+    targetPort: rest # Target port name in container
+  - name: rpc
+    port: 6123
+    targetPort: rpc # Target port name in container
+  # clusterIP: None # Use ClusterIP unless headless is specifically needed
+  selector:
+    app: fluss
+    component: flink-jobmanager
+---
+# Source: fluss/templates/minio-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-release-fp-fluss-minio
+  labels:
+    app: fluss
+    component: minio
+spec:
+  # type: ClusterIP # Default type, can be overridden
+  type: ClusterIP
+  ports:
+    - port: 9000 # API Port (e.g., 9000)
+      targetPort: api # Target port name in container
+      name: api
+    - port: 9001 # Console Port
+      targetPort: console # Target port name in container
+      name: console
+  selector:
+    app: fluss
+    component: minio
+---
+# Source: fluss/templates/tablet-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-release-fp-fluss-tablet
+  labels:
+    app: fluss
+    component: tablet
+spec:
+  clusterIP: None
+  ports:
+    - port: 8081
+      targetPort: 8081
+      protocol: TCP
+      name: rpc
+  selector:
+    app: fluss
+    component: tablet
+---
+# Source: fluss/templates/zookeeper-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-release-fp-fluss-zookeeper
+  labels:
+    app: fluss
+    component: zookeeper
+spec:
+  type: ClusterIP
+  ports:
+    - port: 2181
+      targetPort: 2181 # Or targetPort: client if name used in container
+      name: client
+  selector:
+    app: fluss
+    component: zookeeper
+---
+# Source: fluss/templates/coordinator-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-release-fp-fluss-coordinator
+  labels:
+    app: fluss
+    component: coordinator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fluss
+      component: coordinator
+  template:
+    metadata:
+      labels:
+        app: fluss
+        component: coordinator
+    spec:
+      serviceAccountName: test-release-fp-fluss
+      securityContext:
+        {}
+      containers:
+        - name: fluss-coordinator
+          securityContext:
+            {}
+          image: "alibaba/fluss-coordinator:latest"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 9123
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          env:
+            # Directly set environment variables from values.yaml
+            - name: WAREHOUSE_URI
+              value: "file:///tmp/paimon"
+            - name: ZOOKEEPER_ADDRESS
+              value: "fluss-zookeeper:2181"
+            - name: ZOOKEEPER_PATH_ROOT
+              value: "/fluss"
+            # Add MinIO env vars only if persistence is enabled
+            - name: MINIO_ENDPOINT
+              value: http://test-release-fp-fluss-minio:9000
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: test-release-fp-fluss-minio-secret
+                  key: accessKey
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: test-release-fp-fluss-minio-secret
+                  key: secretKey # end useConfigMap conditional
+          volumeMounts:
+      volumes:
+---
+# Source: fluss/templates/flink-jobmanager.yaml
+apiVersion: apps/v1
+kind: Deployment # Or StatefulSet for HA
+metadata:
+  name: test-release-fp-fluss-flink-jobmanager
+  labels:
+    app: fluss
+    component: flink-jobmanager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fluss
+      component: flink-jobmanager
+  template:
+    metadata:
+      labels:
+        app: fluss
+        component: flink-jobmanager
+    spec:
+      serviceAccountName: test-release-fp-fluss
+      securityContext:
+        {}
+      containers:
+      - name: jobmanager
+        securityContext:
+          {}
+        image: "flink:1.20"
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8081
+          name: rest # Flink REST/UI port
+        - containerPort: 6123
+          name: rpc # Flink RPC port
+        - containerPort: 6124
+          name: blob # Flink blob port
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+          requests:
+            cpu: 200m
+            memory: 512Mi
+        env:
+        # Pass FLUSS coordinator address so Flink jobs can connect
+        - name: FLUSS_COORDINATOR_HOST
+          value: "test-release-fp-fluss-coordinator"
+        - name: FLUSS_COORDINATOR_PORT
+          value: "9123"
+        # Add other Flink config via env if needed
+        # Example: High availability config pointing to ZK
+        # - name: HIGH_AVAILABILITY
+        #   value: zookeeper
+        # - name: HIGH_AVAILABILITY_STORAGE_DIR
+        #   value: s3://<your-ha-bucket>/flink-ha/ # Or other HA storage path
+        # - name: HIGH_AVAILABILITY_ZOOKEEPER_QUORUM
+        #   value: test-release-fp-fluss-zookeeper:2181
+        # - name: HIGH_AVAILABILITY_ZOOKEEPER_ROOT
+        #   value: /flink
+      # Add nodeSelector, tolerations etc. from global values
+---
+# Source: fluss/templates/flink-taskmanager.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-release-fp-fluss-flink-taskmanager
+  labels:
+    app: fluss
+    component: flink-taskmanager
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fluss
+      component: flink-taskmanager
+  template:
+    metadata:
+      labels:
+        app: fluss
+        component: flink-taskmanager
+    spec:
+      serviceAccountName: test-release-fp-fluss
+      securityContext:
+        {}
+      containers:
+      - name: taskmanager
+        securityContext:
+          {}
+        image: "flink:1.20"
+        imagePullPolicy: IfNotPresent
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+          requests:
+            cpu: 200m
+            memory: 512Mi
+        env:
+        - name: JOB_MANAGER_RPC_ADDRESS # Set based on JobManager service
+          value: test-release-fp-fluss-flink-jobmanager # Assumes service name
+        # Add other Flink config via env if needed (e.g., task slots, memory)
+        # Example:
+        # - name: TASK_MANAGER_NUMBER_OF_TASK_SLOTS
+        #   value: "2"
+        # - name: TASK_MANAGER_MEMORY_PROCESS_SIZE
+        #   value: "1728m"
+      # Add nodeSelector, tolerations etc. from global values
+---
+# Source: fluss/templates/minio-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment # Or StatefulSet
+metadata:
+  name: test-release-fp-fluss-minio
+  labels:
+    app: fluss
+    component: minio
+spec:
+  replicas: 1 # MinIO standalone mode
+  selector:
+    matchLabels:
+      app: fluss
+      component: minio
+  template:
+    metadata:
+      labels:
+        app: fluss
+        component: minio
+    spec:
+      serviceAccountName: test-release-fp-fluss
+      securityContext:
+        {}
+      containers:
+      - name: minio
+        securityContext:
+          {}
+        image: "minio/minio:latest"
+        imagePullPolicy: IfNotPresent
+        args:
+        - server
+        - /data
+        - --console-address
+        - ":9001" # Expose console on different port if needed
+        ports:
+        - containerPort: 9000 # API port (e.g., 9000)
+          name: api
+        - containerPort: 9001 # Console port
+          name: console
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        env:
+        # MINIO_ROOT_USER and MINIO_ROOT_PASSWORD loaded from Secret
+        - name: MINIO_ROOT_USER
+          valueFrom:
+            secretKeyRef:
+              name: test-release-fp-fluss-minio-secret
+              key: accessKey
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: test-release-fp-fluss-minio-secret
+              key: secretKey
+        # Optionally configure bucket auto-creation or other settings
+        volumeMounts:
+        - name: data
+          mountPath: /data # MinIO data directory
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: test-release-fp-fluss-minio-pvc
+      # Add nodeSelector, tolerations etc. from global values
+---
+# Source: fluss/templates/zookeeper-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment # Or StatefulSet for production quorum
+metadata:
+  name: test-release-fp-fluss-zookeeper
+  labels:
+    app: fluss
+    component: zookeeper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fluss
+      component: zookeeper
+  template:
+    metadata:
+      labels:
+        app: fluss
+        component: zookeeper
+    spec:
+      # Add service account, security contexts, affinity etc. from global values if needed
+      serviceAccountName: test-release-fp-fluss
+      securityContext:
+        {}
+      containers:
+      - name: zookeeper
+        securityContext:
+          {}
+        image: "zookeeper:3.8"
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 2181
+          name: client
+        # Add liveness/readiness probes if desired
+        # Add resource limits/requests
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        # If ZK persistence is desired, mount a PVC
+        volumeMounts:
+      volumes:
+      # Add nodeSelector, tolerations etc. from global values
+---
+# Source: fluss/templates/tablet-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: test-release-fp-fluss-tablet
+  labels:
+    app: fluss
+    component: tablet
+spec:
+  serviceName: test-release-fp-fluss-tablet
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fluss
+      component: tablet
+  template:
+    metadata:
+      labels:
+        app: fluss
+        component: tablet
+    spec:
+      serviceAccountName: test-release-fp-fluss
+      securityContext:
+        {}
+      containers:
+        - name: fluss-tablet
+          securityContext:
+            {}
+          image: "alibaba/fluss-tablet:latest"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+            requests:
+              cpu: 200m
+              memory: 512Mi
+          env:
+            - name: WAREHOUSE_URI
+              value: "file:///tmp/paimon"
+            - name: ZOOKEEPER_ADDRESS
+              value: "fluss-zookeeper:2181"
+            - name: ZOOKEEPER_PATH_ROOT
+              value: "/fluss"
+            - name: MINIO_ENDPOINT
+              value: http://test-release-fp-fluss-minio:9000
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: test-release-fp-fluss-minio-secret
+                  key: accessKey
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: test-release-fp-fluss-minio-secret
+                  key: secretKey
+            - name: TABLET_SERVER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          volumeMounts:
+      volumes:

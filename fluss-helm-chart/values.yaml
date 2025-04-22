@@ -1,0 +1,155 @@
+# Default values for FLUSS Helm Chart
+
+# Global flags
+enableFlink: false             # Master switch to deploy Flink cluster
+usePersistence: false          # If true, enable persistent storage with MinIO
+useConfigMap: false            # If true, load FLUSS config from ConfigMap instead of direct env
+useSecret: false               # If true, load sensitive values (e.g. MinIO creds) from Secret
+
+coordinator:
+  # enabled: true # This component is core, assumed enabled. Remove flag? Or keep for consistency? Keep for now.
+  enabled: true
+  image:
+    repository: "alibaba/fluss-coordinator"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    type: ClusterIP # Keep type here, but port is now top-level in example
+    port: 9123     # Coordinator service port (for clients to connect)
+  resources: # Keep existing resource structure
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  env:                         # Environment variables for Coordinator
+    ZOOKEEPER_ADDRESS: "fluss-zookeeper:2181"    # Use internal ZK service by default
+    ZOOKEEPER_PATH_ROOT: "/fluss"                # ZooKeeper znode root for FLUSS
+    WAREHOUSE_URI: "file:///tmp/paimon"          # Default storage path (file or S3 URI)
+    # (If usePersistence=true, WAREHOUSE_URI might be set to an S3 bucket URI - handled in templates)
+
+tablet:
+  # enabled: true # Also core, assumed enabled? Keep flag.
+  enabled: true
+  image:
+    repository: "alibaba/fluss-tablet"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicaCount: 2              # deploy 2 tablet server pods by default
+  service: # Add service section similar to coordinator for consistency? Example has no port here. Keep existing structure.
+    type: ClusterIP
+    port: 8081 # Keep existing port or align with plan's example (which lacks one)? Keep existing for now.
+  resources: # Keep existing resource structure
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  persistence: # Keep existing persistence structure under tablet? Plan has global usePersistence. Remove this block? Keep for potential tablet-specific storage options later? Let's remove to align with plan.
+    # enabled: true
+    # storageClass: ""
+    # size: 10Gi
+  env: # Tablet servers may use the same env keys for ZK and storage as coordinator:
+    ZOOKEEPER_ADDRESS: "fluss-zookeeper:2181"
+    ZOOKEEPER_PATH_ROOT: "/fluss"
+    WAREHOUSE_URI: "file:///tmp/paimon"
+    # TABLET_SERVER_ID: "" # Set dynamically in StatefulSet template
+
+zookeeper:
+  enabled: true                # ZK is required unless external one used
+  image:
+    repository: "zookeeper"
+    tag: "3.8"                 # ZooKeeper image for coordination
+    pullPolicy: IfNotPresent
+  replicaCount: 1              # Single ZK instance (can be 3 for prod)
+  service:
+    type: ClusterIP # Keep type here
+    port: 2181
+  resources: # Keep existing resource structure
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  persistence:
+    enabled: false           # (Optional) if true, use PVC for ZK data
+    storageClass: ""         # Add storageClass for consistency
+    size: 5Gi                # Keep existing size
+
+flink:
+  # 'enabled' flag is global (enableFlink)
+  jobManager: # Changed from jobmanager
+    image:
+      repository: "flink"
+      tag: "1.20" # Ensure Flink 1.20
+      pullPolicy: IfNotPresent
+    replicaCount: 1
+    service:
+      type: ClusterIP # Keep type here
+      port: 8081          # Flink JobManager UI/REST port
+    resources: # Keep existing resource structure
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+  taskManager: # Changed from taskmanager
+    image:
+      repository: "flink"
+      tag: "1.20" # Ensure Flink 1.20
+      pullPolicy: IfNotPresent
+    replicaCount: 2
+    resources: # Keep existing resource structure
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+    # Flink-specific configs like task slots, memory via env or extra values can be added here
+
+minio:
+  # 'enabled' flag is global (usePersistence)
+  image:
+    repository: "minio/minio"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP # Keep type here
+    port: 9000
+  resources: # Keep existing resource structure
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  # Persistence settings moved under 'minio' to group them
+  persistence:
+    # enabled: true # Controlled by global usePersistence
+    storageClass: ""         # Default storage class (can be overridden)
+    size: "10Gi"             # Size of PersistentVolumeClaim for MinIO data
+  credentials: # Keep existing credentials structure
+    accessKey: "minioadmin"      # Default MinIO credentials (will be placed in Secret)
+    secretKey: "minioadmin"
+  bucket: "fluss-data"         # Bucket name to use for FLUSS storage
+
+# Global configuration (keep existing, maybe remove overrides if using helpers)
+global:
+  imagePullSecrets: []
+  # nameOverride: "" # Prefer helm fullname helper
+  # fullnameOverride: "" # Prefer helm fullname helper
+  serviceAccount:
+    create: true
+    # name: "" # Prefer helm serviceAccountName helper
+    annotations: {}
+  podSecurityContext: {} # Keep for pod-level settings
+  securityContext: {}    # Keep for container-level settings
+  nodeSelector: {}
+  tolerations: []
+  affinity: {} 

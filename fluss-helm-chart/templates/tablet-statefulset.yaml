@@ -1,0 +1,115 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "fluss.fullname" . }}-tablet
+  labels:
+    app: {{ include "fluss.name" . }}
+    component: tablet
+spec:
+  serviceName: {{ include "fluss.fullname" . }}-tablet
+  replicas: {{ .Values.tablet.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "fluss.name" . }}
+      component: tablet
+  template:
+    metadata:
+      labels:
+        app: {{ include "fluss.name" . }}
+        component: tablet
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "fluss.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}-tablet
+          securityContext:
+            {{- toYaml .Values.global.securityContext | nindent 12 }}
+          image: "{{ .Values.tablet.image.repository }}:{{ .Values.tablet.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.tablet.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.tablet.service.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.tablet.resources | nindent 12 }}
+          env:
+          {{- if .Values.useConfigMap }}
+            - name: FLUSS_CONFIG
+              value: "/fluss/conf/server.yaml"
+          {{- else }}
+          {{- range $name, $value := .Values.tablet.env }}
+            - name: {{ $name }}
+              value: "{{ $value }}"
+          {{- end }}
+          {{- if .Values.usePersistence }}
+            - name: MINIO_ENDPOINT
+              value: http://{{ include "fluss.fullname" . }}-minio:{{ .Values.minio.service.port }}
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "fluss.fullname" . }}-minio-secret
+                  key: accessKey
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "fluss.fullname" . }}-minio-secret
+                  key: secretKey
+          {{- end }}
+          {{- end }}
+            - name: TABLET_SERVER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          volumeMounts:
+          {{- if .Values.useConfigMap }}
+          - name: fluss-config
+            mountPath: /fluss/conf/server.yaml
+            subPath: server.yaml
+          {{- end }}
+          {{- if not .Values.usePersistence }}
+          - name: paimon-tmp
+            mountPath: /tmp/paimon
+          {{- end }}
+      volumes:
+      {{- if .Values.useConfigMap }}
+      - name: fluss-config
+        configMap:
+          name: {{ include "fluss.fullname" . }}-config
+          items:
+            - key: server.yaml
+              path: server.yaml
+      {{- end }}
+      {{- if not .Values.usePersistence }}
+      - name: paimon-tmp
+        emptyDir:
+          medium: Memory
+      {{- end }}
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

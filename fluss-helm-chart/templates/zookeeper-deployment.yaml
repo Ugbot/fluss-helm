@@ -1,0 +1,63 @@
+{{- if .Values.zookeeper.enabled }}
+apiVersion: apps/v1
+kind: Deployment # Or StatefulSet for production quorum
+metadata:
+  name: {{ include "fluss.fullname" . }}-zookeeper
+  labels:
+    app: {{ include "fluss.name" . }}
+    component: zookeeper
+spec:
+  replicas: {{ .Values.zookeeper.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "fluss.name" . }}
+      component: zookeeper
+  template:
+    metadata:
+      labels:
+        app: {{ include "fluss.name" . }}
+        component: zookeeper
+    spec:
+      # Add service account, security contexts, affinity etc. from global values if needed
+      serviceAccountName: {{ include "fluss.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      containers:
+      - name: zookeeper
+        securityContext:
+          {{- toYaml .Values.global.securityContext | nindent 10 }}
+        image: "{{ .Values.zookeeper.image.repository }}:{{ .Values.zookeeper.image.tag }}"
+        imagePullPolicy: {{ .Values.zookeeper.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.zookeeper.service.port }}
+          name: client
+        # Add liveness/readiness probes if desired
+        # Add resource limits/requests
+        resources:
+          {{- toYaml .Values.zookeeper.resources | nindent 10 }}
+        # If ZK persistence is desired, mount a PVC
+        volumeMounts:
+        {{- if .Values.zookeeper.persistence.enabled }}
+        - name: data
+          mountPath: /data # Default ZK data dir
+        {{- end }}
+      volumes:
+      {{- if .Values.zookeeper.persistence.enabled }}
+      - name: data
+        persistentVolumeClaim:
+          claimName: {{ include "fluss.fullname" . }}-zk-pvc # Assumes a PVC template exists or is created
+      {{- end }}
+      # Add nodeSelector, tolerations etc. from global values
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }} 

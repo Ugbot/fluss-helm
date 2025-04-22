@@ -1,0 +1,293 @@
+---
+# Source: fluss/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-release-cm-fluss-config
+  labels:
+    app: fluss
+    # Add component label? Or keep it generic?
+data:
+  # Example: Generate server.yaml content from values
+  # Adapt this structure based on the actual FLUSS config file format
+  server.yaml: |
+    # --- Coordinator Config ---
+    coordinator.port: 9123
+    # coordinator.other.setting: value
+
+    # --- Tablet Config ---
+    # tablet.rpc.port: 9124 # Example if tablets need specific config
+    # tablet.other.setting: value
+
+    # --- Common Config ---
+    zookeeper.address: fluss-zookeeper:2181
+    zookeeper.path.root: /fluss
+    # --- Storage Config (when ephemeral) ---
+    storage.type: file
+    warehouse.uri: file:///tmp/paimon
+
+    # Add other FLUSS configuration parameters as needed...
+    # Example:
+    # log.level: INFO
+
+  # You could add other config files here as well
+  # another-config.properties: |
+  #   key=value
+---
+# Source: fluss/templates/coordinator-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-release-cm-fluss-coordinator
+  labels:
+    app: fluss
+    component: coordinator
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9123
+      targetPort: 9123
+      protocol: TCP
+      name: http
+  selector:
+    app: fluss
+    component: coordinator
+---
+# Source: fluss/templates/tablet-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-release-cm-fluss-tablet
+  labels:
+    app: fluss
+    component: tablet
+spec:
+  clusterIP: None
+  ports:
+    - port: 8081
+      targetPort: 8081
+      protocol: TCP
+      name: rpc
+  selector:
+    app: fluss
+    component: tablet
+---
+# Source: fluss/templates/zookeeper-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-release-cm-fluss-zookeeper
+  labels:
+    app: fluss
+    component: zookeeper
+spec:
+  type: ClusterIP
+  ports:
+    - port: 2181
+      targetPort: 2181 # Or targetPort: client if name used in container
+      name: client
+  selector:
+    app: fluss
+    component: zookeeper
+---
+# Source: fluss/templates/coordinator-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-release-cm-fluss-coordinator
+  labels:
+    app: fluss
+    component: coordinator
+  annotations:
+    # Optionally annotate with config-hash for auto-rollout when ConfigMap changes
+    checksum/config: 8afc3ca764683d06f1500dbcf0b710432a4055d8f3c06173e566c7e9f1dafdc2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fluss
+      component: coordinator
+  template:
+    metadata:
+      labels:
+        app: fluss
+        component: coordinator
+    spec:
+      serviceAccountName: test-release-cm-fluss
+      securityContext:
+        {}
+      containers:
+        - name: fluss-coordinator
+          securityContext:
+            {}
+          image: "alibaba/fluss-coordinator:latest"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 9123
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          env:
+            # Load config from ConfigMap if enabled
+            - name: FLUSS_CONFIG
+              value: "/fluss/conf/server.yaml" # Example path, adjust if needed # end useConfigMap conditional
+          volumeMounts:
+          - name: fluss-config
+            mountPath: /fluss/conf/server.yaml # Mount path for ConfigMap
+            subPath: server.yaml # Assuming key in ConfigMap is server.yaml
+          # Mount emptyDir only if not using external persistence (MinIO)
+          - name: paimon-tmp
+            mountPath: /tmp/paimon # Path specified in WAREHOUSE_URI when not using persistence
+      volumes:
+      - name: fluss-config
+        configMap:
+          name: test-release-cm-fluss-config # Assuming ConfigMap name
+          items:
+            - key: server.yaml # Assuming key in ConfigMap is server.yaml
+              path: server.yaml
+      # Define emptyDir volume only if not using external persistence
+      - name: paimon-tmp
+        emptyDir:
+          medium: Memory # Use tmpfs as suggested in plan
+---
+# Source: fluss/templates/zookeeper-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment # Or StatefulSet for production quorum
+metadata:
+  name: test-release-cm-fluss-zookeeper
+  labels:
+    app: fluss
+    component: zookeeper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fluss
+      component: zookeeper
+  template:
+    metadata:
+      labels:
+        app: fluss
+        component: zookeeper
+    spec:
+      # Add service account, security contexts, affinity etc. from global values if needed
+      serviceAccountName: test-release-cm-fluss
+      securityContext:
+        {}
+      containers:
+      - name: zookeeper
+        securityContext:
+          {}
+        image: "zookeeper:3.8"
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 2181
+          name: client
+        # Add liveness/readiness probes if desired
+        # Add resource limits/requests
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        # If ZK persistence is desired, mount a PVC
+        volumeMounts:
+      volumes:
+      # Add nodeSelector, tolerations etc. from global values
+---
+# Source: fluss/templates/tablet-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: test-release-cm-fluss-tablet
+  labels:
+    app: fluss
+    component: tablet
+spec:
+  serviceName: test-release-cm-fluss-tablet
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fluss
+      component: tablet
+  template:
+    metadata:
+      labels:
+        app: fluss
+        component: tablet
+    spec:
+      serviceAccountName: test-release-cm-fluss
+      securityContext:
+        {}
+      containers:
+        - name: fluss-tablet
+          securityContext:
+            {}
+          image: "alibaba/fluss-tablet:latest"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+            requests:
+              cpu: 200m
+              memory: 512Mi
+          env:
+            - name: FLUSS_CONFIG
+              value: "/fluss/conf/server.yaml"
+            - name: TABLET_SERVER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          volumeMounts:
+          - name: fluss-config
+            mountPath: /fluss/conf/server.yaml
+            subPath: server.yaml
+          - name: paimon-tmp
+            mountPath: /tmp/paimon
+      volumes:
+      - name: fluss-config
+        configMap:
+          name: test-release-cm-fluss-config
+          items:
+            - key: server.yaml
+              path: server.yaml
+      - name: paimon-tmp
+        emptyDir:
+          medium: Memory

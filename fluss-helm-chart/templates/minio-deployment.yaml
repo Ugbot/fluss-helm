@@ -1,0 +1,75 @@
+{{- if .Values.usePersistence }}
+apiVersion: apps/v1
+kind: Deployment # Or StatefulSet
+metadata:
+  name: {{ include "fluss.fullname" . }}-minio
+  labels:
+    app: {{ include "fluss.name" . }}
+    component: minio
+spec:
+  replicas: 1 # MinIO standalone mode
+  selector:
+    matchLabels:
+      app: {{ include "fluss.name" . }}
+      component: minio
+  template:
+    metadata:
+      labels:
+        app: {{ include "fluss.name" . }}
+        component: minio
+    spec:
+      serviceAccountName: {{ include "fluss.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      containers:
+      - name: minio
+        securityContext:
+          {{- toYaml .Values.global.securityContext | nindent 10 }}
+        image: "{{ .Values.minio.image.repository }}:{{ .Values.minio.image.tag }}"
+        imagePullPolicy: {{ .Values.minio.image.pullPolicy }}
+        args:
+        - server
+        - /data
+        - --console-address
+        - ":9001" # Expose console on different port if needed
+        ports:
+        - containerPort: {{ .Values.minio.service.port }} # API port (e.g., 9000)
+          name: api
+        - containerPort: 9001 # Console port
+          name: console
+        resources:
+          {{- toYaml .Values.minio.resources | nindent 10 }}
+        env:
+        # MINIO_ROOT_USER and MINIO_ROOT_PASSWORD loaded from Secret
+        - name: MINIO_ROOT_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "fluss.fullname" . }}-minio-secret
+              key: accessKey
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "fluss.fullname" . }}-minio-secret
+              key: secretKey
+        # Optionally configure bucket auto-creation or other settings
+        volumeMounts:
+        - name: data
+          mountPath: /data # MinIO data directory
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: {{ include "fluss.fullname" . }}-minio-pvc
+      # Add nodeSelector, tolerations etc. from global values
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }} 

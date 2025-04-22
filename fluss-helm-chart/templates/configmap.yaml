@@ -1,0 +1,46 @@
+{{- if .Values.useConfigMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "fluss.fullname" . }}-config
+  labels:
+    app: {{ include "fluss.name" . }}
+    # Add component label? Or keep it generic?
+data:
+  # Example: Generate server.yaml content from values
+  # Adapt this structure based on the actual FLUSS config file format
+  server.yaml: |
+    # --- Coordinator Config ---
+    coordinator.port: {{ .Values.coordinator.service.port }}
+    # coordinator.other.setting: value
+
+    # --- Tablet Config ---
+    # tablet.rpc.port: 9124 # Example if tablets need specific config
+    # tablet.other.setting: value
+
+    # --- Common Config ---
+    zookeeper.address: {{ .Values.coordinator.env.ZOOKEEPER_ADDRESS | default (printf "%s-zookeeper:%d" (include "fluss.fullname" .) .Values.zookeeper.service.port) }}
+    zookeeper.path.root: {{ .Values.coordinator.env.ZOOKEEPER_PATH_ROOT | default "/fluss" }}
+
+    {{- if .Values.usePersistence }}
+    # --- Storage Config (when persistent) ---
+    # Example for S3/MinIO, adjust keys as needed by FLUSS
+    storage.type: s3
+    s3.endpoint: http://{{ include "fluss.fullname" . }}-minio:{{ .Values.minio.service.port }}
+    s3.bucket: {{ .Values.minio.bucket }}
+    # s3.accessKey and s3.secretKey should be read from env vars set via secret
+    # FLUSS application needs to be configured to read these from env
+    {{- else }}
+    # --- Storage Config (when ephemeral) ---
+    storage.type: file
+    warehouse.uri: {{ .Values.coordinator.env.WAREHOUSE_URI | default "file:///tmp/paimon" }}
+    {{- end }}
+
+    # Add other FLUSS configuration parameters as needed...
+    # Example:
+    # log.level: INFO
+
+  # You could add other config files here as well
+  # another-config.properties: |
+  #   key=value
+{{- end }} 

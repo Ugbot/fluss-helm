@@ -1,0 +1,22 @@
+{{- if .Values.usePersistence }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "fluss.fullname" . }}-minio
+  labels:
+    app: {{ include "fluss.name" . }}
+    component: minio
+spec:
+  # type: ClusterIP # Default type, can be overridden
+  type: {{ .Values.minio.service.type | default "ClusterIP" }}
+  ports:
+    - port: {{ .Values.minio.service.port }} # API Port (e.g., 9000)
+      targetPort: api # Target port name in container
+      name: api
+    - port: 9001 # Console Port
+      targetPort: console # Target port name in container
+      name: console
+  selector:
+    app: {{ include "fluss.name" . }}
+    component: minio
+{{- end }} 

@@ -1,0 +1,23 @@
+{{- if .Values.enableFlink }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "fluss.fullname" . }}-flink-jobmanager
+  labels:
+    app: {{ include "fluss.name" . }}
+    component: flink-jobmanager
+spec:
+  # type: ClusterIP # Default type, can be overridden (e.g., NodePort/LoadBalancer for UI)
+  type: {{ .Values.flink.jobManager.service.type | default "ClusterIP" }}
+  ports:
+  - name: rest
+    port: {{ .Values.flink.jobManager.service.port }} # 8081 UI/REST
+    targetPort: rest # Target port name in container
+  - name: rpc
+    port: 6123
+    targetPort: rpc # Target port name in container
+  # clusterIP: None # Use ClusterIP unless headless is specifically needed
+  selector:
+    app: {{ include "fluss.name" . }}
+    component: flink-jobmanager
+{{- end }} 

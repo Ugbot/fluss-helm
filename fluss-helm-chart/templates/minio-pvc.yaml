@@ -1,0 +1,19 @@
+{{- if .Values.usePersistence }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "fluss.fullname" . }}-minio-pvc
+  labels:
+    app: {{ include "fluss.name" . }}
+    component: minio
+spec:
+  accessModes:
+    - ReadWriteOnce # MinIO standalone requires RWO
+  resources:
+    requests:
+      storage: {{ .Values.minio.persistence.size }}
+  {{- if .Values.minio.persistence.storageClass }}
+  # Use specified storage class or default if empty/null
+  storageClassName: {{ .Values.minio.persistence.storageClass }}
+  {{- end }}
+{{- end }} 

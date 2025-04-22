@@ -1,0 +1,54 @@
+{{- if .Values.enableFlink }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "fluss.fullname" . }}-flink-taskmanager
+  labels:
+    app: {{ include "fluss.name" . }}
+    component: flink-taskmanager
+spec:
+  replicas: {{ .Values.flink.taskManager.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app: {{ include "fluss.name" . }}
+      component: flink-taskmanager
+  template:
+    metadata:
+      labels:
+        app: {{ include "fluss.name" . }}
+        component: flink-taskmanager
+    spec:
+      serviceAccountName: {{ include "fluss.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      containers:
+      - name: taskmanager
+        securityContext:
+          {{- toYaml .Values.global.securityContext | nindent 10 }}
+        image: "{{ .Values.flink.taskManager.image.repository }}:{{ .Values.flink.taskManager.image.tag }}"
+        imagePullPolicy: {{ .Values.flink.taskManager.image.pullPolicy }}
+        resources:
+          {{- toYaml .Values.flink.taskManager.resources | nindent 10 }}
+        env:
+        - name: JOB_MANAGER_RPC_ADDRESS # Set based on JobManager service
+          value: {{ include "fluss.fullname" . }}-flink-jobmanager # Assumes service name
+        # Add other Flink config via env if needed (e.g., task slots, memory)
+        # Example:
+        # - name: TASK_MANAGER_NUMBER_OF_TASK_SLOTS
+        #   value: "2"
+        # - name: TASK_MANAGER_MEMORY_PROCESS_SIZE
+        #   value: "1728m"
+      # Add nodeSelector, tolerations etc. from global values
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }} 

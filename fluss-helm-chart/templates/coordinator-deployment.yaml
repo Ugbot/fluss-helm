@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "fluss.fullname" . }}-coordinator
+  labels:
+    app: {{ include "fluss.name" . }}
+    component: coordinator
+{{- if .Values.useConfigMap }}
+  annotations:
+    # Optionally annotate with config-hash for auto-rollout when ConfigMap changes
+    checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+{{- end }}
+spec:
+  replicas: {{ .Values.coordinator.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "fluss.name" . }}
+      component: coordinator
+  template:
+    metadata:
+      labels:
+        app: {{ include "fluss.name" . }}
+        component: coordinator
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "fluss.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}-coordinator
+          securityContext:
+            {{- toYaml .Values.global.securityContext | nindent 12 }}
+          image: "{{ .Values.coordinator.image.repository }}:{{ .Values.coordinator.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.coordinator.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.coordinator.service.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.coordinator.resources | nindent 12 }}
+          env:
+          {{- if .Values.useConfigMap }}
+            # Load config from ConfigMap if enabled
+            - name: FLUSS_CONFIG
+              value: "/fluss/conf/server.yaml" # Example path, adjust if needed
+          {{- else }}
+            # Directly set environment variables from values.yaml
+          {{- range $name, $value := .Values.coordinator.env }}
+            - name: {{ $name }}
+              value: "{{ $value }}"
+          {{- end }}
+          {{- if .Values.usePersistence }}
+            # Add MinIO env vars only if persistence is enabled
+            - name: MINIO_ENDPOINT
+              value: http://{{ include "fluss.fullname" . }}-minio:{{ .Values.minio.service.port }}
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "fluss.fullname" . }}-minio-secret
+                  key: accessKey
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "fluss.fullname" . }}-minio-secret
+                  key: secretKey
+          {{- end }}
+          {{- end }} # end useConfigMap conditional
+          volumeMounts:
+          {{- if .Values.useConfigMap }}
+          - name: fluss-config
+            mountPath: /fluss/conf/server.yaml # Mount path for ConfigMap
+            subPath: server.yaml # Assuming key in ConfigMap is server.yaml
+          {{- end }}
+          {{- if not .Values.usePersistence }}
+          # Mount emptyDir only if not using external persistence (MinIO)
+          - name: paimon-tmp
+            mountPath: /tmp/paimon # Path specified in WAREHOUSE_URI when not using persistence
+          {{- end }}
+      volumes:
+      {{- if .Values.useConfigMap }}
+      - name: fluss-config
+        configMap:
+          name: {{ include "fluss.fullname" . }}-config # Assuming ConfigMap name
+          items:
+            - key: server.yaml # Assuming key in ConfigMap is server.yaml
+              path: server.yaml
+      {{- end }}
+      {{- if not .Values.usePersistence }}
+      # Define emptyDir volume only if not using external persistence
+      - name: paimon-tmp
+        emptyDir:
+          medium: Memory # Use tmpfs as suggested in plan
+      {{- end }}
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }} 

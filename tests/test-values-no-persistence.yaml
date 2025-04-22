@@ -1,0 +1,40 @@
+# Test values for non-persistent setup
+usePersistence: false
+useConfigMap: false
+useSecret: false
+
+# Use default ServiceAccount
+global:
+  serviceAccount:
+    create: false
+    name: "default"
+
+# Disable MinIO
+minio:
+  enabled: false
+
+# Configure components to use in-memory storage
+coordinator:
+  image:
+    repository: fluss/fluss
+    tag: latest
+  env:
+    WAREHOUSE_URI: file:///tmp/paimon
+    ZOOKEEPER_ADDRESS: fluss-zookeeper:2181
+    ZOOKEEPER_PATH_ROOT: /fluss
+    SERVER_TYPE: coordinatorServer
+
+tablet:
+  image:
+    repository: fluss/fluss
+    tag: latest
+  env:
+    WAREHOUSE_URI: file:///tmp/paimon
+    ZOOKEEPER_ADDRESS: fluss-zookeeper:2181
+    ZOOKEEPER_PATH_ROOT: /fluss
+    SERVER_TYPE: tabletServer
+
+# Disable persistence for Zookeeper
+zookeeper:
+  persistence:
+    enabled: false 

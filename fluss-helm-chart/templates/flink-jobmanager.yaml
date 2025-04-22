@@ -1,0 +1,68 @@
+{{- if .Values.enableFlink }}
+apiVersion: apps/v1
+kind: Deployment # Or StatefulSet for HA
+metadata:
+  name: {{ include "fluss.fullname" . }}-flink-jobmanager
+  labels:
+    app: {{ include "fluss.name" . }}
+    component: flink-jobmanager
+spec:
+  replicas: {{ .Values.flink.jobManager.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app: {{ include "fluss.name" . }}
+      component: flink-jobmanager
+  template:
+    metadata:
+      labels:
+        app: {{ include "fluss.name" . }}
+        component: flink-jobmanager
+    spec:
+      serviceAccountName: {{ include "fluss.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      containers:
+      - name: jobmanager
+        securityContext:
+          {{- toYaml .Values.global.securityContext | nindent 10 }}
+        image: "{{ .Values.flink.jobManager.image.repository }}:{{ .Values.flink.jobManager.image.tag }}"
+        imagePullPolicy: {{ .Values.flink.jobManager.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.flink.jobManager.service.port }}
+          name: rest # Flink REST/UI port
+        - containerPort: 6123
+          name: rpc # Flink RPC port
+        - containerPort: 6124
+          name: blob # Flink blob port
+        resources:
+          {{- toYaml .Values.flink.jobManager.resources | nindent 10 }}
+        env:
+        # Pass FLUSS coordinator address so Flink jobs can connect
+        - name: FLUSS_COORDINATOR_HOST
+          value: "{{ include "fluss.fullname" . }}-coordinator"
+        - name: FLUSS_COORDINATOR_PORT
+          value: "{{ .Values.coordinator.service.port }}"
+        # Add other Flink config via env if needed
+        # Example: High availability config pointing to ZK
+        # - name: HIGH_AVAILABILITY
+        #   value: zookeeper
+        # - name: HIGH_AVAILABILITY_STORAGE_DIR
+        #   value: s3://<your-ha-bucket>/flink-ha/ # Or other HA storage path
+        # - name: HIGH_AVAILABILITY_ZOOKEEPER_QUORUM
+        #   value: {{ include "fluss.fullname" . }}-zookeeper:{{ .Values.zookeeper.service.port }}
+        # - name: HIGH_AVAILABILITY_ZOOKEEPER_ROOT
+        #   value: /flink
+      # Add nodeSelector, tolerations etc. from global values
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }} 

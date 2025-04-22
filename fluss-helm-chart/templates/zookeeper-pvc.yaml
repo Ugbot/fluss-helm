@@ -1,0 +1,19 @@
+{{- if and .Values.zookeeper.enabled .Values.zookeeper.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "fluss.fullname" . }}-zk-pvc
+  labels:
+    app: {{ include "fluss.name" . }}
+    component: zookeeper
+spec:
+  accessModes:
+    - ReadWriteOnce # Default access mode for ZK data
+  resources:
+    requests:
+      storage: {{ .Values.zookeeper.persistence.size }}
+  {{- if .Values.zookeeper.persistence.storageClass }}
+  # Use specified storage class or default if empty/null
+  storageClassName: {{ .Values.zookeeper.persistence.storageClass }}
+  {{- end }}
+{{- end }} 

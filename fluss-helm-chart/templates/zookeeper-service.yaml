@@ -1,0 +1,18 @@
+{{- if .Values.zookeeper.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "fluss.fullname" . }}-zookeeper
+  labels:
+    app: {{ include "fluss.name" . }}
+    component: zookeeper
+spec:
+  type: {{ .Values.zookeeper.service.type | default "ClusterIP" }}
+  ports:
+    - port: {{ .Values.zookeeper.service.port }}
+      targetPort: {{ .Values.zookeeper.service.port }} # Or targetPort: client if name used in container
+      name: client
+  selector:
+    app: {{ include "fluss.name" . }}
+    component: zookeeper
+{{- end }} 

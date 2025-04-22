@@ -1,0 +1,245 @@
+---
+# Source: fluss/templates/coordinator-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-release-defaults-fluss-coordinator
+  labels:
+    app: fluss
+    component: coordinator
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9123
+      targetPort: 9123
+      protocol: TCP
+      name: http
+  selector:
+    app: fluss
+    component: coordinator
+---
+# Source: fluss/templates/tablet-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-release-defaults-fluss-tablet
+  labels:
+    app: fluss
+    component: tablet
+spec:
+  clusterIP: None
+  ports:
+    - port: 8081
+      targetPort: 8081
+      protocol: TCP
+      name: rpc
+  selector:
+    app: fluss
+    component: tablet
+---
+# Source: fluss/templates/zookeeper-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-release-defaults-fluss-zookeeper
+  labels:
+    app: fluss
+    component: zookeeper
+spec:
+  type: ClusterIP
+  ports:
+    - port: 2181
+      targetPort: 2181 # Or targetPort: client if name used in container
+      name: client
+  selector:
+    app: fluss
+    component: zookeeper
+---
+# Source: fluss/templates/coordinator-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-release-defaults-fluss-coordinator
+  labels:
+    app: fluss
+    component: coordinator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fluss
+      component: coordinator
+  template:
+    metadata:
+      labels:
+        app: fluss
+        component: coordinator
+    spec:
+      serviceAccountName: test-release-defaults-fluss
+      securityContext:
+        {}
+      containers:
+        - name: fluss-coordinator
+          securityContext:
+            {}
+          image: "alibaba/fluss-coordinator:latest"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 9123
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          env:
+            # Directly set environment variables from values.yaml
+            - name: WAREHOUSE_URI
+              value: "file:///tmp/paimon"
+            - name: ZOOKEEPER_ADDRESS
+              value: "fluss-zookeeper:2181"
+            - name: ZOOKEEPER_PATH_ROOT
+              value: "/fluss" # end useConfigMap conditional
+          volumeMounts:
+          # Mount emptyDir only if not using external persistence (MinIO)
+          - name: paimon-tmp
+            mountPath: /tmp/paimon # Path specified in WAREHOUSE_URI when not using persistence
+      volumes:
+      # Define emptyDir volume only if not using external persistence
+      - name: paimon-tmp
+        emptyDir:
+          medium: Memory # Use tmpfs as suggested in plan
+---
+# Source: fluss/templates/zookeeper-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment # Or StatefulSet for production quorum
+metadata:
+  name: test-release-defaults-fluss-zookeeper
+  labels:
+    app: fluss
+    component: zookeeper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fluss
+      component: zookeeper
+  template:
+    metadata:
+      labels:
+        app: fluss
+        component: zookeeper
+    spec:
+      # Add service account, security contexts, affinity etc. from global values if needed
+      serviceAccountName: test-release-defaults-fluss
+      securityContext:
+        {}
+      containers:
+      - name: zookeeper
+        securityContext:
+          {}
+        image: "zookeeper:3.8"
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 2181
+          name: client
+        # Add liveness/readiness probes if desired
+        # Add resource limits/requests
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        # If ZK persistence is desired, mount a PVC
+        volumeMounts:
+      volumes:
+      # Add nodeSelector, tolerations etc. from global values
+---
+# Source: fluss/templates/tablet-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: test-release-defaults-fluss-tablet
+  labels:
+    app: fluss
+    component: tablet
+spec:
+  serviceName: test-release-defaults-fluss-tablet
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fluss
+      component: tablet
+  template:
+    metadata:
+      labels:
+        app: fluss
+        component: tablet
+    spec:
+      serviceAccountName: test-release-defaults-fluss
+      securityContext:
+        {}
+      containers:
+        - name: fluss-tablet
+          securityContext:
+            {}
+          image: "alibaba/fluss-tablet:latest"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+            requests:
+              cpu: 200m
+              memory: 512Mi
+          env:
+            - name: WAREHOUSE_URI
+              value: "file:///tmp/paimon"
+            - name: ZOOKEEPER_ADDRESS
+              value: "fluss-zookeeper:2181"
+            - name: ZOOKEEPER_PATH_ROOT
+              value: "/fluss"
+            - name: TABLET_SERVER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          volumeMounts:
+          - name: paimon-tmp
+            mountPath: /tmp/paimon
+      volumes:
+      - name: paimon-tmp
+        emptyDir:
+          medium: Memory
